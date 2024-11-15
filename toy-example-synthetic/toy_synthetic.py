@@ -148,6 +148,59 @@ def gmm1_pdf(bin_centers, locs, var=0.01):
 def gmm2_pdf(bin_centers, locs, var=0.01):
     return (gaussian_pdf(bin_centers, locs[0], var) + gaussian_pdf(bin_centers, locs[1], var))/2
 
+
+def generate_parabolic_dataset(n_samples, var=0.01, seed=42):
+    """
+    Generates a 3D dataset with n_samples samples.
+
+    The dataset is generated as follows:
+    1. x and y are sampled uniformly from (-0.8, 0.8)
+    3. z is sampled from a GMM with means x and y, each with variance var
+
+    Parameters:
+    - n_samples (int): Number of samples to generate.
+
+    Returns:
+    - dataset (ndarray): An array of shape (n_samples, 3) containing the 3D dataset.
+    """
+    rng = np.random.default_rng(seed=seed)
+    # Step 1: Sample x uniformly from (-0.8, 0.8)
+    x = rng.uniform(-0.8, 0.8, n_samples)
+    y = rng.uniform(-0.8, 0.8, n_samples)
+
+    def sample_parabolic():
+        M = 3/2
+        uniform_density = 2
+        t = rng.uniform(-1/4, 1/4)
+        u = rng.uniform(0, 1)
+        while u >= 48*(1/16 - t**2)/(M * uniform_density):
+            t = rng.uniform(-1/4, 1/4)
+            u = rng.uniform(0, 1)
+        return t
+
+    # Step 3: Sample z from a GMM with means x and y, each with variance 0.01
+    z = np.zeros(n_samples)
+    for i in range(n_samples):
+        # Randomly choose either x[i] or y[i] as the mean for z
+        if rng.uniform(0, 1) < 0.5:
+            z[i] = x[i] + sample_parabolic()
+        else:
+            z[i] = y[i] + sample_parabolic()
+
+    # Combine x, y, z into a single dataset
+    dataset = np.vstack((x, y, z)).T
+    return dataset
+
+def parabolic_pdf(bin_centers, loc, rad=1/4):
+    bins = len(bin_centers)
+    mask = np.abs(bin_centers - loc) < rad
+    pdf = np.ones(bins) * 1e-10
+    pdf[mask] = 48*(1/16 - (bin_centers[mask]-loc)**2) * (1/2) * (1/np.sum(mask))
+    return pdf / np.sum(pdf)
+    
+def parabolic_mixture_pdf(bin_centers, locs, rad=1/4):
+    return (parabolic_pdf(bin_centers, locs[0]) + parabolic_pdf(bin_centers, locs[1]))/ 2.0
+
 # Quantization function, assuming dataset in the range (-1, 1)
 def quantize_dataset(dataset, b):
     data_range = (-1, 1)
@@ -212,7 +265,6 @@ def run_experiment(
 
     # Split into training and testing sets
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    print(y_test[30:40])
     undig_test = X_test # unquantized version of test data
 
     # Convert to PyTorch tensors
@@ -239,8 +291,14 @@ def run_experiment(
     elif exper == 'gmm':
         target_pdfs = torch.tensor(np.array([gmm1_pdf(bin_centers, x, var) for x in undig_test])).cuda()
     
-    else:
+    elif exper == 'gmm2':
         target_pdfs = torch.tensor(np.array([gmm2_pdf(bin_centers, x, var) for x in undig_test])).cuda()
+
+    elif exper == 'para':
+        target_pdfs = torch.tensor(np.array([parabolic_mixture_pdf(bin_centers, x, var) for x in undig_test])).cuda()
+
+    else:
+        return NotImplementedError
 
     saved_pdfs = None
     kl = None
@@ -330,7 +388,8 @@ if __name__ == "__main__":
     num_samples = 5000
     var = 0.01
     bins = 50
-    dataset_dict = {"gaussian": generate_gaussian_dataset, 'gmm': generate_gmm_dataset, 'gmm2': generate_gmm_dataset2}
+    dataset_dict = {'gaussian': generate_gaussian_dataset, 'gmm': generate_gmm_dataset, 
+                    'gmm2': generate_gmm_dataset2, 'para': generate_parabolic_dataset}
     dataset = dataset_dict[args.dataset](num_samples, var, seed=args.seed)
     pdfs, metrics = run_experiment(
         args.dataset, 

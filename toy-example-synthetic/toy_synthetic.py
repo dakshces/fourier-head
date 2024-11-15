@@ -24,7 +24,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
-from scipy.stats import norm
+from scipy.stats import norm, beta
 from tqdm import tqdm
 import wandb, json
 import os
@@ -148,6 +148,53 @@ def gmm1_pdf(bin_centers, locs, var=0.01):
 def gmm2_pdf(bin_centers, locs, var=0.01):
     return (gaussian_pdf(bin_centers, locs[0], var) + gaussian_pdf(bin_centers, locs[1], var))/2
 
+
+def generate_beta_dataset(n_samples, var=0.01, seed=42):
+    """
+    Generates a 3D dataset with n_samples samples.
+
+    The dataset is generated as follows:
+    1. x is sampled uniformly from (-0.8, 0.8)
+    2. y is sampled from a Gaussian centered at x with variance var
+    3. z is sampled from a Gaussian centered at y with variance var
+
+    Parameters:
+    - n_samples (int): Number of samples to generate.
+
+    Returns:
+    - dataset (ndarray): An array of shape (n_samples, 3) containing the 3D dataset.
+    """
+    rng = np.random.default_rng(seed=seed)
+    # Step 1: Sample x uniformly from (-0.8, 0.8)
+    x = rng.uniform(-0.8, 0.8, n_samples)
+
+    # Step 2: Sample y from a Gaussian centered at x with variance var
+    y = rng.normal(loc=x, scale=np.sqrt(var))
+
+    print(x.shape)
+    print(y.shape)
+    print(rng.beta(np.abs(x[0]), np.abs(y[0])))
+    # Step 3: Sample z from a Gaussian centered at y with variance var
+    sign = rng.choice([1, -1], size=n_samples)
+    z =  np.array([sign[i] * rng.beta(np.abs(x[i]), np.abs(y[i])) for i in range(n_samples)])
+    
+    
+    print(z.shape)
+    # Combine x, y, z into a single dataset
+    dataset = np.vstack((x, y, z)).T
+    return dataset
+
+def beta_pdf(bin_centers, loc):
+    print(bin_centers)
+    pos = bin_centers[bin_centers >= 0]
+    pmf =  beta.pdf(pos, np.abs(loc[0]), np.abs(loc[1])) * 1 / (2 * pos.shape[0])
+    pmf = np.concatenate((pmf[::-1], pmf))
+    print(loc)
+    print(pmf)
+    print(np.sum(pmf))
+    return pmf / np.sum(pmf)
+
+
 # Quantization function, assuming dataset in the range (-1, 1)
 def quantize_dataset(dataset, b):
     data_range = (-1, 1)
@@ -239,8 +286,15 @@ def run_experiment(
     elif exper == 'gmm':
         target_pdfs = torch.tensor(np.array([gmm1_pdf(bin_centers, x, var) for x in undig_test])).cuda()
     
-    else:
+    elif exper == 'gmm2':
         target_pdfs = torch.tensor(np.array([gmm2_pdf(bin_centers, x, var) for x in undig_test])).cuda()
+
+    elif exper == 'beta':
+        target_pdfs = torch.tensor(np.array([beta_pdf(bin_centers, x) for x in undig_test])).cuda()
+
+    else:
+        return NotImplementedError
+
 
     saved_pdfs = None
     kl = None
@@ -327,7 +381,8 @@ if __name__ == "__main__":
     num_samples = 5000
     var = 0.01
     bins = 50
-    dataset_dict = {"gaussian": generate_gaussian_dataset, 'gmm': generate_gmm_dataset, 'gmm2': generate_gmm_dataset2}
+    dataset_dict = {'gaussian': generate_gaussian_dataset, 'gmm': generate_gmm_dataset, 
+                    'gmm2': generate_gmm_dataset2, 'beta': generate_beta_dataset}
     dataset = dataset_dict[args.dataset](num_samples, var, seed=args.seed)
     pdfs, metrics = run_experiment(
         args.dataset, 

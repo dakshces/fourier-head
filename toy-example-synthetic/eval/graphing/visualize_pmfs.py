@@ -50,8 +50,9 @@ def plot_combined_graphs(prefix, fourier, linear, true, idxs, output_fname):
     linear = [np.load(prefix + linear[j])[idxs[j]] for j in range(3)]
     true = [np.load(prefix + true[j])[idxs[j]] for j in range(3)]
     
-    titles = ['Gaussian Dataset', 'GMM Dataset', 'GMM-2 Dataset']
-    y_lim = [0.2, 0.13, 0.09]
+    #titles = ['Gaussian Dataset', 'GMM Dataset', 'GMM-2 Dataset']
+    titles = ['Beta Dataset', 'Beta Dataset', 'Beta Dataset']
+    y_lim = [0.2, 0.2, 0.2]
     # Create a 3x2 grid of subplots
     fig, axes = plt.subplots(3, 2, figsize=(12, 5)) 
 
@@ -61,7 +62,7 @@ def plot_combined_graphs(prefix, fourier, linear, true, idxs, output_fname):
     # Plot for each dataset (fourier, linear, true)
     for i in range(len(fourier)):
         plot_histogram_with_line(fourier[i], true[i], axes[i, 1], titles[i], label='Fourier', ylim=y_lim[i])
-        plot_histogram_with_line(linear[i], true[i], axes[i, 0], titles[i], label='Linear', ylim= y_lim[i])
+        plot_histogram_with_line(linear[i], true[i], axes[i, 0], titles[i], label='GMM', ylim= y_lim[i])
 
     # Add a single shared y-axis label
     fig.text(0.04, 0.5, 'Probability Mass', va='center', rotation='vertical', fontsize=18)  # Single y-axis label
@@ -83,11 +84,11 @@ if __name__ == "__main__":
     #fourier = ['para/fourier/0.0/12/pmfs_42.npy', 'gmm/fourier/0.0/10/pmfs_1.npy', 'gmm2/fourier/0.0/10/pmfs_1.npy']
     #linear = ['para/linear/0.0/0/pmfs_42.npy', 'gmm/linear/0.0/0/pmfs_1.npy', 'gmm2/linear/0.0/0/pmfs_1.npy']
     #true = ['para/true_1.npy', 'gmm/true_42.npy','gmm2/true_1.npy']
-    fourier = ['para/fourier/0.0/12/pmfs_42.npy', 'para/fourier/0.0/12/pmfs_42.npy', 'para/fourier/0.0/12/pmfs_42.npy'] 
-    linear = ['para/linear/0.0/0/pmfs_42.npy', 'para/linear/0.0/0/pmfs_42.npy', 'para/linear/0.0/0/pmfs_42.npy']
-    true = ['para/true_42.npy', 'para/true_42.npy', 'para/true_42.npy'] 
+    fourier = ['beta/fourier/0.0/12/pmfs_42.npy', 'beta/fourier/0.0/12/pmfs_42.npy', 'beta/fourier/0.0/12/pmfs_42.npy'] 
+    linear = ['beta/gmm/0.0/None/pmfs_42.npy', 'beta/gmm/0.0/None/pmfs_42.npy', 'beta/gmm/0.0/None/pmfs_42.npy']
+    true = ['beta/true_42.npy', 'beta/true_42.npy', 'beta/true_42.npy'] 
     # Specify which pmf to be visualized for each of the datasets (there are a total 1000 test pmfs)
-    pmf_ixs = [100, 20, 532]  
-
+    pmf_ixs = [90, 70, 900]  
+        #80,90
     plot_combined_graphs(output_dir, fourier, linear, true, pmf_ixs, "toy_predicted_vs_true.png")
     print(f"Saved graph to {output_dir}")

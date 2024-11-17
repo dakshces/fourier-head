@@ -36,6 +36,8 @@ for path in sys.path:
         sys.path.append(path.replace("/toy-example-synthetic", "/"))
 
 from fourier_head import Fourier_Head
+from gmm_head import GMM_Head
+
 
 def generate_gaussian_dataset(n_samples, var=0.1, seed=42):
     """
@@ -298,11 +300,13 @@ def quantize_dataset(dataset, b):
 
 # Define the MLP model with a hidden layer and a linear/fourier head
 class MLP(nn.Module):
-    def __init__(self, input_size, num_classes, head='linear', num_frequencies=9, regularizion_gamma=0):
+    def __init__(self, input_size, num_classes, head='linear', num_frequencies=9, regularizion_gamma=0, num_gaussians=0):
         super(MLP, self).__init__()
         self.mlp_head = nn.Linear(32, num_classes)
         if head == 'fourier':
             self.mlp_head = Fourier_Head(32, num_classes, num_frequencies, regularizion_gamma)
+        elif head == "gmm":
+            self.mlp_head = GMM_Head(32, num_classes, num_gaussians)
 
         self.layers = nn.Sequential(
             nn.Linear(input_size, 64),
@@ -396,7 +400,7 @@ def run_experiment(
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
     # Instantiate the model, loss function, and optimizer
-    model = MLP(input_size=2, num_classes=bins, head=head, num_frequencies=freqs, regularizion_gamma=gamma).cuda()
+    model = MLP(input_size=2, num_classes=bins, head=head, num_frequencies=freqs, regularizion_gamma=gamma, num_gaussians=args.n_gaussians).cuda()
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
 
@@ -437,7 +441,7 @@ def run_experiment(
 
             # Forward pass
             outputs = model(inputs)
-            if head == 'linear':
+            if head in ['linear', "gmm"]:
                 loss = criterion(outputs, labels)
             else:
                 loss = criterion(outputs, labels) + model.mlp_head.loss_regularization
@@ -475,15 +479,23 @@ def run_experiment(
                 expected_vals = bin_centers[torch.round(expected_bins).to(torch.int)]
                 mse = np.mean((expected_vals - bin_centers[y_test])**2)
                 mses = [] 
-                for t in np.arange(0.01, 0.05, 0.001):
-                    sample_indices = sample_with_temperature(outputs, 30, t).cpu()
-                    #print((bin_centers[sample_indices] - bin_centers[y_test].reshape(-1,1)).shape)
-                    mse_t = np.mean((bin_centers[sample_indices] - bin_centers[y_test].reshape(-1,1))**2)
-                    mses.append(mse_t)
+                # for t in np.arange(0.01, 0.05, 0.001):
+                #     sample_indices = sample_with_temperature(outputs, 30, t).cpu()
+                #     #print((bin_centers[sample_indices] - bin_centers[y_test].reshape(-1,1)).shape)
+                #     mse_t = np.mean((bin_centers[sample_indices] - bin_centers[y_test].reshape(-1,1))**2)
+                #     mses.append(mse_t)
                 
                 mae = np.mean(np.abs(bin_centers[predicted]-bin_centers[y_test]))
+                mask_less = bin_centers < 0
+                mask_more = bin_centers > 0
+                _, indices_less = torch.topk(pdfs[:, mask_less], k=1, dim=-1)
+                _, indices_more = torch.topk(pdfs[:, mask_more], k=1, dim=-1)
 
-                tqdm.write(f'Epoch [{epoch + 1}/{epochs}], Loss: {avg_loss:.4f}, KL divergence: {kl:.4f}, MSE: {mse:.4f}, MAE (max): {mae:.4f}, mses: {mses}')
+                mse_2 = np.mean((bin_centers[indices_less.cpu()] - bin_centers[y_test].reshape(-1,1))**2)
+                mse_2 += np.mean((bin_centers[indices_more.cpu()] - bin_centers[y_test].reshape(-1,1))**2)
+                #print((bin_centers[indices.cpu()] - bin_centers[y_test].reshape(-1,1))[:10])
+
+                tqdm.write(f'Epoch [{epoch + 1}/{epochs}], Loss: {avg_loss:.4f}, KL divergence: {kl:.4f}, MSE: {mse:.4f}, MAE (max): {mae:.4f}, mse_2: {mse_2/2}')
 
                 if logging:
                     wandb.log({"loss": avg_loss, "accuracy": accuracy, "KL divergence": kl, "MSE": mse})
@@ -500,7 +512,9 @@ def parse_arguments():
     # Adding arguments
     parser.add_argument('--head', type=str, required=True, 
                         help='Specify head option (string)')
-    parser.add_argument('--n_freqs', type=int, required=True, 
+    parser.add_argument('--n_freqs', type=int, required=False, 
+                        help='Number of frequencies (int)')
+    parser.add_argument('--n_gaussians', type=int, required=False,
                         help='Number of frequencies (int)')
     parser.add_argument('--dataset', type=str, required=True, 
                         help='Path to the dataset (string)')

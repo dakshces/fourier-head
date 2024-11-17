@@ -76,16 +76,18 @@ def plot_combined_graphs(prefix, fourier, linear, true, idxs, output_fname):
 
 if __name__ == "__main__":
     # Change output directory
-    output_dir = 'eval/graphing/saved_pmfs/'
-
+    #output_dir = 'eval/graphing/saved_pmfs/'
+    output_dir = 'output/'
     # Example usage: choose which model to load from for each of the datasets
     # For each dataset, be sure to specify the same seed for fourier, linear, and true
-    fourier = ['gaussian/fourier/0.0/18/pmfs_1.npy', 'gmm/fourier/0.0/10/pmfs_1.npy', 'gmm2/fourier/0.0/10/pmfs_1.npy']
-    linear = ['gaussian/linear/0.0/0/pmfs_1.npy', 'gmm/linear/0.0/0/pmfs_1.npy', 'gmm2/linear/0.0/0/pmfs_1.npy']
-    true = ['gaussian/true_1.npy', 'gmm/true_1.npy','gmm2/true_1.npy']
-
+    #fourier = ['para/fourier/0.0/12/pmfs_42.npy', 'gmm/fourier/0.0/10/pmfs_1.npy', 'gmm2/fourier/0.0/10/pmfs_1.npy']
+    #linear = ['para/linear/0.0/0/pmfs_42.npy', 'gmm/linear/0.0/0/pmfs_1.npy', 'gmm2/linear/0.0/0/pmfs_1.npy']
+    #true = ['para/true_1.npy', 'gmm/true_42.npy','gmm2/true_1.npy']
+    fourier = ['para/fourier/0.0/12/pmfs_42.npy', 'para/fourier/0.0/12/pmfs_42.npy', 'para/fourier/0.0/12/pmfs_42.npy'] 
+    linear = ['para/linear/0.0/0/pmfs_42.npy', 'para/linear/0.0/0/pmfs_42.npy', 'para/linear/0.0/0/pmfs_42.npy']
+    true = ['para/true_42.npy', 'para/true_42.npy', 'para/true_42.npy'] 
     # Specify which pmf to be visualized for each of the datasets (there are a total 1000 test pmfs)
-    pmf_ixs = [488, 250, 331]  
+    pmf_ixs = [100, 20, 532]  
 
     plot_combined_graphs(output_dir, fourier, linear, true, pmf_ixs, "toy_predicted_vs_true.png")
     print(f"Saved graph to {output_dir}")

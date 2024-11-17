@@ -23,6 +23,7 @@ freq = 12
 for exper in ['gaussian', 'gmm', 'gmm2']:
 #for gamma in ['0.0', '1e-06']:
     mses = []
+    maes = []
     for seed in [1,2,3,42]:
         dataset = dataset_dict[exper](num_samples, var, seed=seed)
         X = dataset[:, :2]  # Features: (u, v)
@@ -31,14 +32,23 @@ for exper in ['gaussian', 'gmm', 'gmm2']:
         X_test = torch.tensor(quantize_dataset(X_test, bins), dtype=torch.float32)
         y_test = torch.tensor(quantize_dataset(y_test, bins), dtype=torch.long)
 
-        predicted_pmfs = np.load(f'eval/graphing/saved_pmfs/{exper}/linear/{gamma}/{0}/pmfs_{seed}.npy')
-        expected_vals = compute_expected_value(predicted_pmfs, bins)
-        expected_vals = bin_centers[np.round(expected_vals).astype(int)]
+        predicted_pmfs = np.load(f'eval/graphing/saved_pmfs/{exper}/fourier/{gamma}/{4}/pmfs_{seed}.npy')
+        #expected_vals = compute_expected_value(predicted_pmfs, bins)
+        #expected_vals = bin_centers[np.round(expected_vals).astype(int)]
         #expected_vals = np.sum(bin_centers * predicted_pmfs, axis=1)
-        mses.append(np.mean((expected_vals - bin_centers[y_test])**2))
+        #mses.append(np.mean((expected_vals - bin_centers[y_test])**2))
+        #maes.append(np.mean(np.abs(expected_vals - bin_centers[y_test])))
+        predicted = np.argmax(predicted_pmfs, axis=-1)
+        #print(predicted.shape)
+        mses.append(np.mean((bin_centers[predicted]-bin_centers[y_test])**2))
+        maes.append(np.mean(np.abs(bin_centers[predicted]-bin_centers[y_test])))
     mse = np.mean(mses)
-    std_dev = np.std(mses)
-    print(f'{exper} mse: {mse}, std_dev: {std_dev}')
+    mae = np.mean(maes)
+    std_dev_mse = np.std(mses)
+    std_dev_mae = np.std(maes)
+    print(f'{exper} mse: {mse}, std_dev: {std_dev_mse}')
+    print(f'{exper} mae: {mae}, std_dev: {std_dev_mae}')
+
     # if mse < best_mse:
     #     best_mse = mse
     #     best_gamma = gamma

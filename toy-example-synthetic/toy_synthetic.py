@@ -24,7 +24,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
-from scipy.stats import norm
+from scipy.stats import norm, t, beta
 from tqdm import tqdm
 import wandb, json
 import os
@@ -201,6 +201,92 @@ def parabolic_pdf(bin_centers, loc, rad=1/4):
 def parabolic_mixture_pdf(bin_centers, locs, rad=1/4):
     return (parabolic_pdf(bin_centers, locs[0]) + parabolic_pdf(bin_centers, locs[1]))/ 2.0
 
+
+
+def generate_t_dataset(n_samples, var=0.01, seed=42):
+    """
+    Generates a 3D dataset with n_samples samples.
+
+    The dataset is generated as follows:
+    1. x and y are sampled uniformly from (-0.8, 0.8)
+    3. z is sampled from a GMM with means x and y, each with variance var
+
+    Parameters:
+    - n_samples (int): Number of samples to generate.
+
+    Returns:
+    - dataset (ndarray): An array of shape (n_samples, 3) containing the 3D dataset.
+    """
+    rng = np.random.default_rng(seed=seed)
+    # Step 1: Sample x uniformly from (-0.8, 0.8)
+    x = rng.uniform(-0.8, 0.8, n_samples)
+    y = rng.uniform(-0.8, 0.8, n_samples)
+
+    # Step 3: Sample z from a t-distribution mixture with means x and y, each with param 1
+    z = np.zeros(n_samples)
+    for i in range(n_samples):
+        # Randomly choose either x[i] or y[i] as the mean for z
+        if rng.uniform(0, 1) < 0.5:
+            z[i] += x[i]
+        else:
+            z[i] += y[i]
+
+        u = z[i] + rng.standard_t(1, size=1)[0]
+        while np.abs(u) > 1.0:
+            u  = z[i] + rng.standard_t(1, size=1)[0]
+        
+        z[i] += u
+    # Combine x, y, z into a single dataset
+    dataset = np.vstack((x, y, z)).T
+    return dataset
+
+def t_pdf(bin_edges, bin_centers, loc):
+    loc_bin = np.digitize(loc, bin_edges) - 1
+    xs = bin_centers - bin_centers[loc_bin]
+    pmf =  t.pdf(xs, 1) * 2 / xs.shape[0]
+    #print(np.sum(pmf))
+    return pmf / np.sum(pmf)
+
+def t_mixture_pdf(bin_edges, bin_centers, locs):
+    return (t_pdf(bin_edges, bin_centers, locs[0]) + t_pdf(bin_edges, bin_centers, locs[1]))/2
+
+def generate_beta_dataset(n_samples, var=0.01, seed=42):
+    """
+    Generates a 3D dataset with n_samples samples.
+
+    The dataset is generated as follows:
+    1. x is sampled uniformly from (-0.8, 0.8)
+    2. y is sampled from a Gaussian centered at x with variance var
+    3. z is sampled from a Gaussian centered at y with variance var
+
+    Parameters:
+    - n_samples (int): Number of samples to generate.
+
+    Returns:
+    - dataset (ndarray): An array of shape (n_samples, 3) containing the 3D dataset.
+    """
+    rng = np.random.default_rng(seed=seed)
+    # Step 1: Sample x uniformly from (-0.8, 0.8)
+    x = rng.uniform(-0.8, 0.8, n_samples)
+
+    # Step 2: Sample y from a Gaussian centered at x with variance var
+    y = rng.normal(loc=x, scale=np.sqrt(var))
+
+    # Step 3: Sample z from a Gaussian centered at y with variance var
+    sign = rng.choice([1, -1], size=n_samples)
+    z =  np.array([sign[i] * rng.beta(np.abs(100*x[i]), np.abs(100*y[i])) for i in range(n_samples)])
+    
+    # Combine x, y, z into a single dataset
+    dataset = np.vstack((x, y, z)).T
+    return dataset
+
+def beta_pdf(bin_centers, locs):
+    pos = bin_centers[bin_centers >= 0]
+    pmf =  beta.pdf(pos, np.abs(100*locs[0]), np.abs(100*locs[1])) * 1 / (2 * pos.shape[0])
+    pmf = np.concatenate((pmf[::-1], pmf))
+    return pmf / np.sum(pmf)
+
+
 # Quantization function, assuming dataset in the range (-1, 1)
 def quantize_dataset(dataset, b):
     data_range = (-1, 1)
@@ -229,6 +315,38 @@ class MLP(nn.Module):
     def forward(self, x):
         return self.layers(x)
     
+
+def compute_random_baseline(dataset):
+    n_samples = dataset.shape[0]
+    rng = np.random.default_rng()
+    random_predict = 0 #rng.uniform(-1.0, 1.0, 1)
+    return np.mean((random_predict - dataset)**2)
+
+
+def sample_with_temperature(logits, n_samples, temperature=1.0):
+    """
+    Sample `n_samples` from a probability distribution derived from a batch of `logits` with temperature scaling.
+
+    Args:
+    - logits (torch.Tensor): The logits (raw outputs, e.g., from a neural network) with shape (batch_size, num_classes).
+    - n_samples (int): The number of samples to draw for each element in the batch.
+    - temperature (float): Temperature scaling factor for controlling randomness.
+
+    Returns:
+    - torch.Tensor: A tensor of shape (batch_size, n_samples) containing `n_samples` drawn from each distribution.
+    """
+    # Scale logits by temperature (batch-wise scaling)
+    scaled_logits = logits / temperature
+
+    # Convert logits to probabilities using softmax (per row)
+    probs = torch.softmax(scaled_logits, dim=-1)
+
+    # Draw `n_samples` for each sample in the batch
+    sampled_indices = torch.multinomial(probs, n_samples, replacement=True)
+
+    return sampled_indices
+
+
 
 # Function to run the experiment
 def run_experiment(
@@ -266,7 +384,7 @@ def run_experiment(
     # Split into training and testing sets
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
     undig_test = X_test # unquantized version of test data
-
+    print("random baseline ", compute_random_baseline(y_test))
     # Convert to PyTorch tensors
     X_train = torch.tensor(quantize_dataset(X_train, bins), dtype=torch.float32)
     X_test = torch.tensor(quantize_dataset(X_test, bins), dtype=torch.float32)
@@ -296,6 +414,12 @@ def run_experiment(
 
     elif exper == 'para':
         target_pdfs = torch.tensor(np.array([parabolic_mixture_pdf(bin_centers, x, var) for x in undig_test])).cuda()
+
+    elif exper == 't':
+        target_pdfs = torch.tensor(np.array([t_mixture_pdf(bin_edges, bin_centers, x) for x in undig_test])).cuda()
+
+    elif exper == 'beta':
+        target_pdfs = torch.tensor(np.array([beta_pdf(bin_centers, x) for x in undig_test])).cuda()
 
     else:
         return NotImplementedError
@@ -347,12 +471,19 @@ def run_experiment(
                 kl = kl_loss((pdfs+1e-10).log(), target_pdfs.cuda())
 
                 # MSE
-                #mse = np.mean((bin_centers[predicted]-bin_centers[y_test])**2)
                 expected_bins = torch.sum(torch.arange(bins) * pdfs.cpu(), dim=1)
                 expected_vals = bin_centers[torch.round(expected_bins).to(torch.int)]
                 mse = np.mean((expected_vals - bin_centers[y_test])**2)
+                mses = [] 
+                for t in np.arange(0.01, 0.05, 0.001):
+                    sample_indices = sample_with_temperature(outputs, 30, t).cpu()
+                    #print((bin_centers[sample_indices] - bin_centers[y_test].reshape(-1,1)).shape)
+                    mse_t = np.mean((bin_centers[sample_indices] - bin_centers[y_test].reshape(-1,1))**2)
+                    mses.append(mse_t)
+                
+                mae = np.mean(np.abs(bin_centers[predicted]-bin_centers[y_test]))
 
-                tqdm.write(f'Epoch [{epoch + 1}/{epochs}], Loss: {avg_loss:.4f}, KL divergence: {kl:.4f}, MSE: {mse:.4f}')
+                tqdm.write(f'Epoch [{epoch + 1}/{epochs}], Loss: {avg_loss:.4f}, KL divergence: {kl:.4f}, MSE: {mse:.4f}, MAE (max): {mae:.4f}, mses: {mses}')
 
                 if logging:
                     wandb.log({"loss": avg_loss, "accuracy": accuracy, "KL divergence": kl, "MSE": mse})
@@ -389,8 +520,10 @@ if __name__ == "__main__":
     var = 0.01
     bins = 50
     dataset_dict = {'gaussian': generate_gaussian_dataset, 'gmm': generate_gmm_dataset, 
-                    'gmm2': generate_gmm_dataset2, 'para': generate_parabolic_dataset}
+                    'gmm2': generate_gmm_dataset2, 'para': generate_parabolic_dataset, 
+                    't': generate_t_dataset, 'beta': generate_beta_dataset}
     dataset = dataset_dict[args.dataset](num_samples, var, seed=args.seed)
+    
     pdfs, metrics = run_experiment(
         args.dataset, 
         dataset, 
